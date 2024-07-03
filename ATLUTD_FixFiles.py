@@ -1,8 +1,7 @@
 
-
 #---------------------------------------------------------------------------------------------------------------#
 # Outside Requirements
-#
+# py -m pip install --upgrade package_name
 #---------------------------------------------------------------------------------------------------------------#
 #   ffprobe - installed and in path
 #   ffmpeg - installed and in path
@@ -10,7 +9,7 @@
 
 #---------------------------------------------------------------------------------------------------------------#
 # Load Modules
-#
+# py -m pip install --upgrade
 #---------------------------------------------------------------------------------------------------------------#
 import os                                                            # interact with the file system
 from datetime import datetime                                        # work with dates and times
@@ -31,14 +30,14 @@ from hachoir.parser import createParser                              # hachoir i
 from hachoir.metadata import extractMetadata
 import sys
 import time                                                          # used to add sleep
+import shutil                                                        # ability to move files
 
+from wand.image import Image                                         # ability to work with heic files
 
 #---------------------------------------------------------------------------------------------------------------#
 # In Progress
 #
 #---------------------------------------------------------------------------------------------------------------#
-# get .heic to work, added it to the convert list but it isn't
-# ffmpeg cannot convert .heic files ( as of 2023-02-18 )
 # verify .avif image files
 
 
@@ -60,8 +59,8 @@ class APP( ):
     Total_Deletes = 0
     Total_Images  = 0
     Total_Movies  = 0
-    Extensions_Images          = [ '.jpg', '.jpeg', '.webp', '.jfif', '.png' ]  # cannot convert .heic files ( as of 2023-02-18 )
-    Extensions_Images_Convert  = [ '.webp', '.jfif', '.png' ]
+    Extensions_Images          = [ '.jpg', '.jpeg', '.webp', '.jfif', '.png', '.heic' ]  # cannot convert .heic files ( as of 2023-02-18 )
+    Extensions_Images_Convert  = [ '.webp', '.jfif', '.png', '.heic' ]
     Extensions_Deletes         = [ '.ini', '.aae' ]
 
     Extensions_Movies          = [ '.mp4', '.mov' ]
@@ -107,8 +106,8 @@ class APP( ):
         print( f"Media Conversions" )
         print( f"Converting Media older than {self.Age_Convert} days old" )
         print( f"Converting the following file types:" )
-        print( self.Extensions_Images_Convert )
-        print( self.Extensions_Movies_Convert )
+        print( f"\t{self.Extensions_Images_Convert}" )
+        print( f"\t{self.Extensions_Movies_Convert}" )
 
     #---------------------------------------------------------------------------------------------------------------#
     # Updates the Total Progress Total value
@@ -458,14 +457,18 @@ class APP( ):
                 #Directory_Parent = Directory.split( os.sep )
                 Directory_Parent = Directory.split( "/" )
                 Directory_Parent = Directory_Parent[ len( Directory_Parent ) -1 ]
-                Filename_New = Filename_Base + Filename_Extension
+                Filename_New = f"{Filename_Base}{Filename_Extension}"
                 #print( "Directory: " + Directory + " Filename_Base: " + Filename_Base + "\tFilename_Extension" + Filename_Extension)
                 if ( Filename_Extension == ".JPG" ):
                     # Rename to .jpg
-                    print( "Renaming Extension on : " + Media_File )
+                    #print( "Renaming Extension on : " + Media_File )
+                    print( f"Renaming Extension on : {Filename_Base}" )
                     try: 
-                        Filename_New = Filename_Base + "-" + Filename_Date + '.jpg'
-                        os.rename( Media_File, Directory + os.sep + Filename_New )  # not renaming the file, only changing the extension
+                        Filename_New = f"{Filename_Base}-{Filename_Date}.jpg"
+                        #print( f"to: {Filename_New}" )
+                        #time.sleep(10)
+                        #os.rename( Media_File, Directory + os.sep + Filename_New )
+                        shutil.move( Media_File, Directory + os.sep + Filename_New )
                         #os.rename( Media_File, Filename_New )  # not renaming the file, only changing the extension
                     except Exception as e:
                         print( f"Unable to rename: {Media_File}\n\t{str(e)}" )
@@ -473,20 +476,38 @@ class APP( ):
                     # Rename to .jpg
                     print( "Renaming Extension on : " + Media_File )
                     try: 
-                        Filename_New = Filename_Base + "-" + Filename_Date + '.jpg'
+                        Filename_New = f"{Filename_Base}-{Filename_Date}.jpg"
                         os.rename( Media_File, Directory + os.sep + Filename_New )
                     except Exception as e:
                         print( "Unable to rename: " + Media_File )
+  
                 if ( Filename_Extension.lower() in self.Extensions_Images_Convert ):
-                    print( "Converting [" + Directory_Parent + "]\t" + Filename_Base + Filename_Extension)
-                    subprocess.run( "ffmpeg -hide_banner -loglevel error -i " + "\"" + Media_File +  "\"" + " " + "\"" + Directory + os.sep + Filename_Base + "-" + Filename_Date + '.jpg' + "\"", shell=True)
-                    os.remove(  Media_File )
-                    Filename_New = Filename_Base + "-" + Filename_Date + '.jpg'
+                    if ( Filename_Extension.lower() == ".heic" ):
+                        print( "Converting [" + Directory + "]\t" + Filename_Base + Filename_Extension)
+                        try:
+                            Filename_New = f"{Filename_Base}-{Filename_Date}.jpg"
+                            # Convert HEIC to JPG using wand
+                            with Image(filename=Media_File ) as img:
+                                #Exif_Orientation = img.metadata.get("exif:Orientation", 1)
+                                # ... (orientation correction logic as before) ...
+                                img.format = "jpeg"
+                                img.save(filename=os.path.join( Directory, Filename_New ) )
+                                if ( os.path.exists( os.path.join( Directory, Filename_New ) ) ):
+                                    os.remove( Media_File )
+
+                        except Exception as e:
+                            print(f"Error processing {Filename_Base}: {e}")  # Handle potential errors
+                    else:
+
+                        print( f"Converting [{Directory_Parent}]\t{Filename_Base}{Filename_Extension}" )
+                        subprocess.run( "ffmpeg -hide_banner -loglevel error -i " + "\"" + Media_File +  "\"" + " " + "\"" + Directory + os.sep + Filename_Base + "-" + Filename_Date + '.jpg' + "\"", shell=True)
+                        os.remove(  Media_File )
+                        Filename_New = Filename_Base + "-" + Filename_Date + '.jpg'
 
                 # will need to check size on all files
                 self.Image_Resize( Directory_Parent, Directory, Filename_New )
             except Exception as e:
-                print( "An Error has occurred while starting the Image_Convert procedure: " + str( e ) + "\n\t" + Media_File )
+                print( f"An Error has occurred in Thread_Image_Convert(): {e}\n\t{Media_File}" )
 
 
     #---------------------------------------------------------------------------------------------------------------#
@@ -494,49 +515,76 @@ class APP( ):
     # Reisizes images based on the height and width limits.  This is done to help reduce file size issues
     #---------------------------------------------------------------------------------------------------------------#
     def Image_Resize( self, Directory_Parent, Directory, Filename ):
-        Width_Limit = 2000
-        Height_Limit = 1500
-        Message = "\n  [" + Directory_Parent + "]\t" + Filename
-        #Log_Info( "      Checking size on: " + file )
-        Path_Check = Directory + "\\" + Filename
-        process = subprocess.run( "ffprobe -v error -select_streams v -show_entries stream=width,height -of csv=p=0:s=x " + "\"" + Path_Check + "\"", shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
-        output = process.stdout
-        #Log_Info( "      " + str( output ) )
         try:
-            Check_Width = int( output.split("x")[0] )
-            Check_Height = int( output.split("x")[1] )
-        except:
-            Message = + "\n\t\t*** Invalid file"
-            print( Message )
-            #print( "\t[" + Directory_Parent + "]\t" + Filename + "\n\t\t " + Message )
-            #print( "*** Invalid file: " + Path_Check)
-            return
+            Width_Limit = 2000
+            Height_Limit = 1500
+            Message = "\n  [" + Directory_Parent + "]\t" + Filename
+            #Log_Info( "      Checking size on: " + file )
+            Path_Check = f"{Directory}\\{Filename}"
+            Command = f"ffprobe -v error -select_streams v -show_entries stream=width,height -of csv=p=0:s=x \"{Path_Check}\""
+            #Command = f"ffprobe -v error -select_streams v -show_entries stream=width,height -of csv=p=0:s=x {os.sep}{Path_Check}{os.sep}"
+            #process = subprocess.run( "ffprobe -v error -select_streams v -show_entries stream=width,height -of csv=p=0:s=x " + "\"" + Path_Check + "\"", shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+            process = subprocess.run( Command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+            output = process.stdout
+            #print( f"\n***DEBUG:\nprocess = {process}\nCommand = {Command}" )
+            #Log_Info( "      " + str( output ) )
+            try:
+                Check_Width = int( output.split("x")[0] )
+                Check_Height = int( output.split("x")[1] )
+            except:
+                Message = f"{Message}\n\t*** Invalid file\n{process.stdout}"
+                #print( f"{Message}" )
+                #print( "\t[" + Directory_Parent + "]\t" + Filename + "\n\t\t " + Message )
+                #print( "*** Invalid file: " + Path_Check)
+                return
 
-        if ( Check_Width > Width_Limit ) or ( Check_Height > Height_Limit ):
-            Message = Message + "\n\tReducing Size"
-            Message = Message + "\n\tWidth:\t" + str( Check_Width )
-            Message = Message + "\n\tHeight:\t" + str( Check_Height )
-            File_Size_Pre = os.path.getsize( Path_Check )
-            process_resize = subprocess.run( "ffmpeg -y -hide_banner -loglevel error -i " + "\"" + Path_Check + "\"" + " -vf scale='min(2000,iw)':min'(1500,ih)':force_original_aspect_ratio=decrease " + "\"" + Path_Check + "\"", shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
-            output_resize = process_resize.stdout
-            File_Size_Post = os.path.getsize( Path_Check )
-            Message = Message + "\n\tSize Pre:\t" + self.Human_Readable_Size( File_Size_Pre, 2 )
-            Message = Message + "\n\tSize After:\t" + self.Human_Readable_Size( File_Size_Post, 2 )
-            Message = Message + "\n\tSize Saved:\t" + self.Human_Readable_Size( File_Size_Pre - File_Size_Post, 2 )
-            print( Message )
-
+            #print( f"\n***DEBUG A: Filename: {Filename}" + 
+            #       f"\nCheck_Width: {Check_Width}" +
+            #       f"\nCheck_Height: {Check_Height}" +
+            #       f"\nWidth_Limit: {Width_Limit}" +
+            #       f"\nHeight_Limit: {Height_Limit}"
+            #    )
+            #print( f"Output: {output}" )
+            #print( f"Check_Width: {Check_Width}" )
+            #print( f"Check_Height: {Check_Height}" )
+            #print( f"Width_Limit: {Width_Limit}" )
+            #print( f"Height_Limit: {Height_Limit}" )
+            #print( f"{Message}\n\tWidth:\t{Check_Width}" )
+            #print( f"{Message}\n\tHeight:\t{Check_Height}" )
+            if ( Check_Width > Width_Limit ) or ( Check_Height > Height_Limit ):
+                #print( f"\n***DEBUG" )
+                Message = f"{Message}\n\tReducing Size"
+                Message = f"{Message}\n\tWidth:\t{Check_Width}"
+                Message = f"{Message}\n\tHeight:\t{Check_Height}"
+                File_Size_Pre = os.path.getsize( Path_Check )
+                Command = f"ffmpeg -y -hide_banner -loglevel error -i \"{Path_Check}\" -vf scale='min(2000,iw)':min'(1500,ih)':force_original_aspect_ratio=decrease \"{Path_Check}\""
+                #print( f"\n***DEBUG:\nCommand = {Command}" )
+                #process_resize = subprocess.run( "ffmpeg -y -hide_banner -loglevel error -i " + "\"" + Path_Check + "\"" + " -vf scale='min(2000,iw)':min'(1500,ih)':force_original_aspect_ratio=decrease " + "\"" + Path_Check + "\"", shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+                process_resize = subprocess.run( Command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+                #print( f"\n***DEBUG:\nprocess = {process_resize}\nCommand = {Command}" )
+                output_resize = process_resize.stdout
+                File_Size_Post = os.path.getsize( Path_Check )
+                Message = f"{Message}\n\tSize Pre:\t{self.Human_Readable_Size( File_Size_Pre, 2 )}"
+                Message = f"{Message}\n\tSize After:\t{self.Human_Readable_Size( File_Size_Post, 2 )}"
+                Message = f"{Message}\n\tSize Saved:\t{self.Human_Readable_Size( File_Size_Pre - File_Size_Post, 2 )}"
+                print( f"{Message}" )
+                #print( f"***DEBUG D: Filename_Extension: {Filename_Extension}" )
+        except Exception as e:
+            print( f"An Error has occurred in Image_Resize():\n\t{e}" )
     #---------------------------------------------------------------------------------------------------------------#
     # Function: Human_Readable_Size
     # Display file sizes in a human readable format
     # Returns human readable string
     #---------------------------------------------------------------------------------------------------------------#
     def Human_Readable_Size( self, size, decimal_places=2):
-        for unit in ['B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB']:
-            if size < 1024.0 or unit == 'PiB':
-                break
-            size /= 1024.0
-        return f"{size:.{decimal_places}f} {unit}"
-
+        try:
+            for unit in ['B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB']:
+                if size < 1024.0 or unit == 'PiB':
+                    break
+                size /= 1024.0
+            return f"{size:.{decimal_places}f} {unit}"
+        except Exception as e:
+            print( f"An Error has occurred in Human_Readable_Size():\n\t{e}" )
 
 #---------------------------------------------------------------------------------------------------------------#
 # Main start
@@ -558,11 +606,13 @@ if __name__ == '__main__':
     print( f"" )
 
     App.Add_Directory( r"D:/Data/Pics/Atlanta United/ATLUTD VIPs/Games" )
+    App.Add_Directory( r"D:/Data/Pics/Atlanta United/ATLUTD VIPs/Games - ATLUTD2" )
     App.Add_Directory( r"D:/Data/Pics/Atlanta United/ATLUTD VIPs/Rumors" )
     App.Add_Directory( r"D:/Data/Pics/Atlanta United/ATLUTD VIPs/Dates" )
     App.Add_Directory( r"D:/Data/Pics/Atlanta United/ATLUTD VIPs/art" )
     App.Add_Directory( r"D:/Data/Pics/Atlanta United/ATLUTD VIPs/pics" )
-    
+    #App.Add_Directory( r"D:/Data/Pics/Atlanta United/ATLUTD VIPs/Games/2024" )
+
     
 
     App.Build_File_List()
