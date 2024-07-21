@@ -3,173 +3,106 @@
 # Outside Requirements
 # py -m pip install --upgrade package_name
 #---------------------------------------------------------------------------------------------------------------#
-#   ffprobe - installed and in path
-#   ffmpeg - installed and in path
+# ffprobe - installed and in path
+# ffmpeg - installed and in path
+# Obtained from: https://www.videohelp.com/software/ffmpeg
+
 
 
 #---------------------------------------------------------------------------------------------------------------#
 # Load Modules
 # py -m pip install --upgrade
 #---------------------------------------------------------------------------------------------------------------#
-import os                                                            # interact with the file system
-from datetime import datetime                                        # work with dates and times
-import subprocess                                                    # used for multi threading
-
-import argparse                                                      # used for easy parsing script input parametesr
-import glob                                                          # handling wildcard searches, ex:  *.jpg
-
-from rich.live import Live                                           # the rich modules are used for progress bars
-from rich.panel import Panel
-from rich.progress import (BarColumn, MofNCompleteColumn, Progress,
-                           SpinnerColumn, TextColumn, TimeElapsedColumn)
-from rich.table import Table
-
-from concurrent.futures import ThreadPoolExecutor                    # used for multi threading
-
-from hachoir.parser import createParser                              # hachoir is used to handle movie metadata 
-from hachoir.metadata import extractMetadata
 import sys
-import time                                                          # used to add sleep
-import shutil                                                        # ability to move files
+import os                                                        # interact with the file system
+from Rich_Progress import Rich_Progress                          # Used for displaying progress bars and other rich text in the console
+from Logger import CustomLogger                                  # Standardized Logging
+from datetime import datetime                                    # work with dates and times
+from rich import print
+import glob                                                      # handling wildcard searches, ex:  *.jpg
+from concurrent.futures import ThreadPoolExecutor                # used for multi threading
+import subprocess                                                # used for multi threading
 
-from wand.image import Image                                         # ability to work with heic files
+from hachoir.parser import createParser                          # hachoir is used to handle movie metadata 
+from hachoir.metadata import extractMetadata                     # working with movie metadata
+from wand.image import Image                                     # ability to work with heic files
+from time import sleep                                           # ability to introduce time delays
+
 
 #---------------------------------------------------------------------------------------------------------------#
-# In Progress
-#
+# Class: Album_Parser
+# Parses albums and downloads images from provided JSON data
 #---------------------------------------------------------------------------------------------------------------#
-# verify .avif image files
-
-
-
-#---------------------------------------------------------------------------------------------------------------#
-# Defining the Class
-#---------------------------------------------------------------------------------------------------------------#
-class APP( ):
-    Directories = []
-    Media_Files = []
-    
-    Media_Files_Delete = []
-    Media_Files_Images = []
-    Media_Files_Movies = []
-    Media_Files_Other  = []
-
+class Fix_Files():
+    Logger = CustomLogger( __file__, "Debug" )
     Today = datetime.today()
-    Age_Convert   = 7
-    Total_Deletes = 0
-    Total_Images  = 0
-    Total_Movies  = 0
-    Extensions_Images          = [ '.jpg', '.jpeg', '.webp', '.jfif', '.png', '.heic' ]  # cannot convert .heic files ( as of 2023-02-18 )
-    Extensions_Images_Convert  = [ '.webp', '.jfif', '.png', '.heic' ]
-    Extensions_Deletes         = [ '.ini', '.aae' ]
 
-    Extensions_Movies          = [ '.mp4', '.mov' ]
-    Extensions_Movies_Convert  = [ '.mov' ]
-    Dir_Exiftool = "D:/Data/Download/apps/ExifTool/exiftool-12.49"
+    Age_Convert  = 7
+    Width_Limit  = 2000
+    Height_Limit = 1500
+    Size_Before = 0
+    Size_After  = 0
 
-    File_Search_Pattern = "/**/*.*"
+    Dir_Exiftool = r"D:\Data\Download\apps\ExifTool\exiftool-12.89_64"
+    Dir_FFMpeg   = r"D:\Data\Scripts\ffmpeg"
 
-    # Progress Bar
-    Job_Progress_Overall_View = ""
-    Job_Progress_Detail_View = ""
-    Jobs_Overall = ""
-    Jobs_Detail = ""
+    Media = {
+        "Directories": [],
+        "Files":       [],
+        "Deletes":     [],
+        "Images":      [],
+        "Movies":      [],
+        "Others":      []
+    }
 
-    # Threads
-    Number_Threads_Identify = 5
-    Number_Threads_Delete   = 2
-    Number_Threads_Movies   = 5
-    Number_Threads_Images   = 15
+    Data_Types = {
+        "Deletes":        [ '.ini', '.aae' ],
+        "Images":         [ '.jpg', '.jpeg', '.webp', '.jfif', '.png', '.heic', '.avif' ],
+        "Images_Convert": [ '.webp', '.jfif', '.png', '.heic', '.avif' ],
+        "Movies":         [ '.mp4', '.mov' ],
+        "Movies_Convert": [ '.mov' ],
 
-    #---------------------------------------------------------------------------------------------------------------#
-    # Class initialization
-    # - Defines the default Progress Bar, Platform type
-    #---------------------------------------------------------------------------------------------------------------#
-    def __init__ ( self ):
-        self.Job_Progress_Overall_View = Progress( 
-            "{task.description}",
-            SpinnerColumn(),
-            BarColumn(),
-            TextColumn( "[progress.percentage]{task.percentage:>3.0f}%" ),
-            TimeElapsedColumn(),
-            )
-        self.Job_Progress_Detail_View = Progress( 
-            "{task.description}",
-            SpinnerColumn(),
-            BarColumn(),
-            TextColumn( "[progress.percentage]{task.percentage:>3.0f}%" ),
-            TimeElapsedColumn()
-            )
-        self.Jobs_Overall = self.Job_Progress_Overall_View.add_task( "[blue]Overall Status", total=0 )
-        self.Jobs_Detail  = self.Job_Progress_Detail_View.add_task( "[blue]Detail Status", visible=False, total=0 )
+    }
 
-        print( f"Media Conversions" )
-        print( f"Converting Media older than {self.Age_Convert} days old" )
-        print( f"Converting the following file types:" )
-        print( f"\t{self.Extensions_Images_Convert}" )
-        print( f"\t{self.Extensions_Movies_Convert}" )
+    Threads = {
+        "Deletes":  2,
+        "Movies":   5,
+        "Images":   15
+    }
 
-    #---------------------------------------------------------------------------------------------------------------#
-    # Updates the Total Progress Total value
-    #---------------------------------------------------------------------------------------------------------------#
-    def Jobs_Update_Overall_Total( self ):
-        #Total = sum( task.total for task in self.Job_Progress_Detail_View.tasks )
-        Total = len( self.Media_Files_Delete ) + len( self.Media_Files_Images ) + len( self.Media_Files_Movies )
-
-        #print( f"Set Job_Progress_Overall_View total to: {Total}")
-        self.Job_Progress_Overall_View.update( self.Jobs_Overall, total = Total, refresh=True )
-
-    #---------------------------------------------------------------------------------------------------------------#
-    # Updates the Overall Progress Bar Display
-    #---------------------------------------------------------------------------------------------------------------#
-    def Jobs_Update_Overall_Progress( self ):
-        self.Job_Progress_Overall_View.update( self.Jobs_Overall, advance=1, refresh=True )
-
+    Tasks = {
+        "Deletes": None,
+        "Movies":  None,
+        "Images":  None,
+        "Others":  None
+    }
 
 
     #---------------------------------------------------------------------------------------------------------------#
-    # Creates the Jobs Default View
-    # Defines the tables, layout
+    # Initialize the class
     #---------------------------------------------------------------------------------------------------------------#
-    def Jobs_Build_Default_View( self, Overall_Title=None, Detail_Title=None ):
-        if not( Overall_Title ):
-            Overall_Title = "Overall Progress"
-        if not( Detail_Title ):
-            Detail_Title = "Detail View"
-        New_Table = Table.grid()
-        New_Table.add_row( 
-            Panel.fit( self.Job_Progress_Overall_View, title="[b]" + Overall_Title, border_style="yellow", padding=(0, 0) )
-        )
-        New_Table.add_row( 
-            Panel.fit( self.Job_Progress_Detail_View, title="[b]" + Detail_Title, border_style="yellow", padding=(1, 1) )
-        )
-        return New_Table
+    def __init__( self ):
+        self.Progress = Rich_Progress()
+
+        self.Logger.Log( f"[cyan]__________________________________________________________________________________[/cyan]" )
+        self.Logger.Log( f"[cyan] Media Conversions[/cyan]" )
+        self.Logger.Log( f"[cyan]__________________________________________________________________________________[/cyan]" )
+        self.Logger.Log( f"Converting Media older than {self.Age_Convert} days old" )
+        self.Logger.Log( f"Working on the following file types:" )
+        for Key, Values in self.Data_Types.items():
+            self.Logger.Log( f"\t{Key}\t{Values}")
+        #self.Logger.Log( f"\t{self.Data_Types}" )
 
 
     #---------------------------------------------------------------------------------------------------------------#
-    # Function: Detail_Display_Additional_Info
-    # Create additional information to be displayed in the Detail view
-    # Returns the Task, to be used later
+    # Add new directory to the list of directories
     #---------------------------------------------------------------------------------------------------------------#
-    def Detail_Display_Additional_Info( self, String ):
-        Current_Task = self.Job_Progress_Detail_View.add_task( "[cyan]" + String, total=1 )
+    def Add_Directory( self, Directory ):
 
-        return Current_Task
-
-    #---------------------------------------------------------------------------------------------------------------#
-    # Function: Detail_Display_Increment_Additional_Info
-    # Increments the Task by 1
-    #---------------------------------------------------------------------------------------------------------------#
-    def Detail_Display_Increment_Additional_Info( self, Current_Task ):
-        self.Job_Progress_Detail_View.update( Current_Task, advance=1, refresh=True )
-
-
-    #---------------------------------------------------------------------------------------------------------------#
-    # Function: Detail_Display_Additional_Info
-    # Hides the job when done
-    #---------------------------------------------------------------------------------------------------------------#
-    def Detail_Close_Additional_Info( self, Current_Task ):
-        self.Job_Progress_Detail_View.update( Current_Task, visible=False, refresh=True )
+        if ( os.path.exists( Directory ) ):
+            self.Media["Directories"].append( Directory )
+        else:
+            self.Logger.Log( f"Error: The directory does not exist: {Directory}", "Error" )
 
 
     #---------------------------------------------------------------------------------------------------------------#
@@ -177,406 +110,332 @@ class APP( ):
     # Loop through the directory to get a list of all files
     #---------------------------------------------------------------------------------------------------------------#
     def Build_File_List( self ):
+        print()
+        self.Logger.Log( f"Scanning the following Directories" )
+        self.Progress.Start( "Overall Status", "Files" )
 
-        for Directory in self.Directories:
-            print()
-            print( f"Looking for files in {Directory}" )
-            Files = glob.glob( Directory + os.sep + self.File_Search_Pattern, recursive=True )
-            if not Files:
-                print( f"\tNo files were found to process." )
-                #sys.exit()
-            else:
-                print( f"\t{len( Files )} files were found to process." )
-                #logging.debug( f"A total of {len( Files )} files were found to process." )
+        for directory in self.Media["Directories"]:
+            self.Logger.Log( f"\t{directory}" )
+            directory_files = glob.glob( directory + os.sep + "/**/*.*", recursive=True )
 
-                for File in Files:
-                    if (os.path.isfile(File) ):
-                        self.Media_Files.append( File )
+            for File in directory_files:
+                File_Modified_date = datetime.fromtimestamp( os.path.getmtime( File ) )
+                Age = self.Today - File_Modified_date
+                if ( Age.days < self.Age_Convert ):
 
-        self.Jobs_Update_Overall_Total()
+                    self.Media["Files"].append( File )
+                    Filename_Extension = os.path.splitext( File )[1].lower()
 
-    #---------------------------------------------------------------------------------------------------------------#
-    # Function: Add_Directory
-    # Add new directory to the list of directories
-    #---------------------------------------------------------------------------------------------------------------#
-    def Add_Directory( self, Directory ):
-        if os.path.exists( Directory ):
-            self.Directories.append( Directory )
+                    # Log file and its extension
+                    #self.Logger.Log(f"Processing file: {file} with extension: {filename_extension}")
+
+                    if Filename_Extension in self.Data_Types["Deletes"]:
+                        if len(self.Media["Deletes"]) == 0:
+                            self.Tasks["Deletes"] = self.Progress.Add_Task("Deletes", Total=0)
+                        self.Media["Deletes"].append( File )
+                    elif Filename_Extension in self.Data_Types["Movies"]:
+                        if len(self.Media["Movies"]) == 0:
+                            self.Tasks["Movies"] = self.Progress.Add_Task("Movies", Total=0)
+                        self.Media["Movies"].append( File )
+                    elif Filename_Extension in self.Data_Types["Images"]:
+                        if len(self.Media["Images"]) == 0:
+                            self.Tasks["Images"] = self.Progress.Add_Task("Images", Total=0)
+                        self.Media["Images"].append( File )
+                    else:
+                        self.Media["Others"].append( File )
+
+        if len(self.Media["Files"]) == 0:
+            self.Logger.Log( f"\tNo files were found to process.", "Warning" )
         else:
-            print( f"Error: The directory does not exist: {Directory}" )
+            # Files found
+            self.Logger.Log(f"Found the following data: ")
+            if "Deletes" in self.Tasks and self.Tasks["Deletes"] is not None:
+                self.Progress.Update_Task( self.Tasks["Deletes"], Total=len(self.Media["Deletes"]) )
+                self.Logger.Log( f"\tDeletes: {len(self.Media['Deletes'])}" )
+            if "Images" in self.Tasks and self.Tasks["Images"] is not None:
+                self.Progress.Update_Task( self.Tasks["Images"], Total=len(self.Media["Images"]) )
+                self.Logger.Log( f"\tImages: {len(self.Media['Images'])}")
+            if "Movies" in self.Tasks and self.Tasks["Movies"] is not None:
+                self.Progress.Update_Task( self.Tasks["Movies"], Total=len(self.Media["Movies"]) )
+                self.Logger.Log( f"\tMovies: {len(self.Media['Movies'])}" )
+            if "Others" in self.Tasks and self.Tasks["Others"] is not None:
+                self.Progress.Update_Task( self.Tasks["Others"], Total=len(self.Media["Others"]) )
+                self.Logger.Log( f"\tOthers: {len(self.Media['Others'])}" )
 
 
     #---------------------------------------------------------------------------------------------------------------#
-    # Function: Process_Files
     # Begin looping through data
     #---------------------------------------------------------------------------------------------------------------#
     def Process_Files( self ):
-        Prep_Table = self.Jobs_Build_Default_View( )
+        self.Logger.Log( f"[cyan]__________________________________________________________________________________[/cyan]" )
+        self.Logger.Log( f"[cyan] Processing Files less than {self.Age_Convert} days old[/cyan]" )
+        self.Logger.Log( f"[cyan]__________________________________________________________________________________[/cyan]" )
 
-        print( "" )
-        print( f"___________________________________________" )
-        print( f"Beginning to Process over found Media Files" )
-        print()
 
-        with Live( Prep_Table, refresh_per_second = 10 ):
-
-            Jobs_Detail_Identify_File = self.Add_Task( self.Job_Progress_Detail_View, "Identifying Media", len( self.Media_Files ) )
-            self.Jobs_Update_Overall_Total()
-    
-            with ThreadPoolExecutor( max_workers = self.Number_Threads_Identify ) as pool:
-                for Media_File in self.Media_Files:
+        if ( len( self.Media["Deletes"] ) > 0 ):
+            with ThreadPoolExecutor( max_workers = self.Threads["Deletes"] ) as pool:
+                for File in self.Media["Deletes"]:
                     # Launch Thread - calls function
-                    pool.submit( self.Thread_Identify_File, Media_File, Jobs_Detail_Identify_File )
+                    pool.submit( self.Thread_Delete, File )
 
-            if ( len ( self.Media_Files_Delete ) > 0 ):
-                print( f"Processing Deletes..." )
-                Jobs_Detail_Media_Delete = self.Add_Task( self.Job_Progress_Detail_View, "Deletes", len( self.Media_Files_Delete ) )
-                self.Jobs_Update_Overall_Total()
-                with ThreadPoolExecutor( max_workers = self.Number_Threads_Delete ) as pool:
-                    for Media_File in self.Media_Files_Delete:
-                        # Launch Thread - calls function
-                        pool.submit( self.Thread_Delete, Media_File, Jobs_Detail_Media_Delete )
+        if ( len( self.Media["Images"] ) > 0 ):
+            with ThreadPoolExecutor( max_workers = self.Threads["Images"] ) as pool:
+                for File in self.Media["Images"]:
+                    # Launch Thread - calls function
+                    pool.submit( self.Thread_Image, File )
 
-            if ( len ( self.Media_Files_Movies ) > 0 ):
-                print( f"Processing Movies..." )
-                Jobs_Detail_Media_Movies = self.Add_Task( self.Job_Progress_Detail_View, "Movies", len( self.Media_Files_Movies ) )
-                self.Jobs_Update_Overall_Total()
-                with ThreadPoolExecutor( max_workers = self.Number_Threads_Movies ) as pool:
-                    for Media_File in self.Media_Files_Movies:
-                        # Launch Thread - calls function
-                        pool.submit( self.Thread_Movies, Media_File, Jobs_Detail_Media_Movies )
+        if ( len( self.Media["Movies"] ) > 0 ):
+            with ThreadPoolExecutor( max_workers = self.Threads["Movies"] ) as pool:
+                for File in self.Media["Movies"]:
+                    # Launch Thread - calls function
+                    pool.submit( self.Thread_Movie, File )
 
-            if ( len ( self.Media_Files_Images ) > 0 ):
-                print( f"Processing Images..." )
-                Jobs_Detail_Media_Images = self.Add_Task( self.Job_Progress_Detail_View, "Images", len( self.Media_Files_Images ) )
-                self.Jobs_Update_Overall_Total()
-                with ThreadPoolExecutor( max_workers = self.Number_Threads_Images ) as pool:
-                    for Media_File in self.Media_Files_Images:
-                        # Launch Thread - calls function
-                        pool.submit( self.Thread_Images, Media_File, Jobs_Detail_Media_Images )
-
-            '''
-            print( f"The following files could not be processed" )
-            for File in self.Media_Files_Other:
-                print( File )
-            '''
-
-    #---------------------------------------------------------------------------------------------------------------#
-    # Function: Add_Task
-    # Add a task to the View
-    # Returns the Job
-    #---------------------------------------------------------------------------------------------------------------#
-    def Add_Task( self, View, Title, Size ):
-        Job = View.add_task( "[blue]" + Title, visible=True, total=Size )
-        return Job
 
     #---------------------------------------------------------------------------------------------------------------#
     # Function: Thread_Delete
     # The Individual Thread dealing with file deletions
     #---------------------------------------------------------------------------------------------------------------#
-    def Thread_Delete( self, Media_File, Jobs_Detail_Media_Delete ):
-        #print( f"Thread-delete: {Media_File}" )
-        Filename = os.path.basename( Media_File )
-        FileSize = os.path.getsize(Media_File)
-        try:
-            Current_Task = self.Detail_Display_Additional_Info( Filename )
-            self.Job_Progress_Detail_View.update( Current_Task, total=FileSize )
-            #time.sleep(1)
+    def Thread_Delete( self, File ):
+        try: 
+            Filename = os.path.basename( File )
+            FileSize = os.path.getsize( File )
+            self.Logger.Log( f"\tDeleting: {Filename}", "Debug" )
+            self.Delete_File_With_Retries( File )
 
-            print( f"\tDeleting: {Filename}" )
-            try:
-                os.remove(  Media_File )
-            except:
-                print( f"\tUnable to delete: {Media_File}" )
+            self.Progress.Update_Task( self.Tasks["Deletes"], Advance=1 )
 
-            self.Detail_Display_Increment_Additional_Info( Current_Task )
-
-            self.Detail_Close_Additional_Info( Current_Task )
-            self.Job_Progress_Detail_View.update( Jobs_Detail_Media_Delete, advance=1 )
-            self.Job_Progress_Overall_View.update( self.Jobs_Overall, advance=1 )
         except Exception as e:
-            print( f"an error has occurred in the Delete Thread:  {str(e)}" )
-
-    #---------------------------------------------------------------------------------------------------------------#
-    # Function: Thread_Movies
-    # The Individual Thread dealing with movie files
-    #---------------------------------------------------------------------------------------------------------------#
-    def Thread_Movies( self, Media_File, Jobs_Detail_Media_Movies ):
-        #print( f"Thread-delete: {Media_File}" )
-        Filename = os.path.basename( Media_File )
-        FileSize = os.path.getsize(Media_File)
-        try:
-            Current_Task = self.Detail_Display_Additional_Info( Filename )
-            self.Job_Progress_Detail_View.update( Current_Task, total=FileSize )
-            #time.sleep(1)
-
-            self.Thread_Movie_Convert( Media_File )
-
-            self.Detail_Display_Increment_Additional_Info( Current_Task )
-
-            self.Detail_Close_Additional_Info( Current_Task )
-            self.Job_Progress_Detail_View.update( Jobs_Detail_Media_Movies, advance=1 )
-            self.Job_Progress_Overall_View.update( self.Jobs_Overall, advance=1 )
-        except Exception as e:
-            print( f"an error has occurred in the Movies Thread:  {str(e)}" )
+            self.Logger.Log( f"An error has occurred in Thread_Delete():\n\t{str(e)}", "Error" )
 
 
     #---------------------------------------------------------------------------------------------------------------#
-    # Function: Thread_Images
-    # The Individual Thread dealing with image files
+    # The Individual Thread dealing with Images
     #---------------------------------------------------------------------------------------------------------------#
-    def Thread_Images( self, Media_File, Jobs_Detail_Media_Images ):
-        #print( f"Thread-delete: {Media_File}" )
-        Filename = os.path.basename( Media_File )
-        FileSize = os.path.getsize(Media_File)
-        try:
-            Current_Task = self.Detail_Display_Additional_Info( Filename )
-            self.Job_Progress_Detail_View.update( Current_Task, total=FileSize )
-            #time.sleep(1)
+    def Thread_Image( self, File ):
+        try: 
+            Filename           = os.path.basename( File )
+            Filename_Extension = os.path.splitext( File )[1]
+            Filename_Base      = os.path.splitext( Filename )[0]
+            Directory = os.path.dirname(  File )
+            Directory_Parent = os.path.basename( Directory )
 
-            self.Thread_Image_Convert( Media_File )
-
-            self.Detail_Display_Increment_Additional_Info( Current_Task )
-
-            self.Detail_Close_Additional_Info( Current_Task )
-            self.Job_Progress_Detail_View.update( Jobs_Detail_Media_Images, advance=1 )
-            self.Job_Progress_Overall_View.update( self.Jobs_Overall, advance=1 )
-        except Exception as e:
-            print( f"an error has occurred in the Images Thread:  {str(e)}" )
-
-    #---------------------------------------------------------------------------------------------------------------#
-    # Function: Thread_Identify_File
-    # The Individual Thread dealing with file identifying media files
-    #---------------------------------------------------------------------------------------------------------------#
-    def Thread_Identify_File( self, Media_File, Jobs_Detail_Identify_Data ):
-
-        Filename_Extension = os.path.splitext(Media_File)[1]
-        Filename_Base = os.path.splitext(Media_File)[0]
-        
-        if ( Filename_Extension.lower() in self.Extensions_Deletes ):
-            self.Media_Files_Delete.append( Media_File )
-
-        elif ( Filename_Extension.lower() in self.Extensions_Images ):
-            self.Media_Files_Images.append( Media_File )
-
-        elif ( Filename_Extension.lower() in self.Extensions_Movies ):
-            self.Media_Files_Movies.append( Media_File )
-
-        else:
-            self.Media_Files_Other.append( Media_File )
-
-        self.Job_Progress_Detail_View.update( Jobs_Detail_Identify_Data, advance=1 )
-
-
-    #---------------------------------------------------------------------------------------------------------------#
-    # Function: Thread_Movie_Convert
-    # Convert the indidivdual Movie
-    #---------------------------------------------------------------------------------------------------------------#
-    def Thread_Movie_Convert( self, Media_File ):
-        Filename           = os.path.basename( Media_File )
-        Filename_Extension = os.path.splitext(Media_File)[1]
-        Filename_Base      = os.path.splitext(Filename)[0]
-
-        File_Modified_date = datetime.fromtimestamp( os.path.getmtime( Media_File ) )
-        Age = self.Today - File_Modified_date
-        if ( Age.days < self.Age_Convert ):
-
-            try:
+            File_Modified_date = datetime.fromtimestamp( os.path.getmtime( File ) )
+            Age = self.Today - File_Modified_date
+            if ( Age.days < self.Age_Convert ):
+                self.Logger.Log( f"Processing: /{Directory_Parent}\t{Filename}" )
                 Filename_Date = datetime.now().strftime('%Y-%m-%d_%H24%M%S') # '2022-09-18_111632'
-                Directory = os.path.dirname( Media_File ) 
-                Directory_Parent = Directory.split( "/" )
-                Directory_Parent = Directory_Parent[ len( Directory_Parent ) -1 ]
-                Filename_New = Filename_Base + Filename_Extension
+                Directory = os.path.dirname( File ) 
+                #Directory_Parent = Directory.split( os.sep )
+                #Directory_Parent = Directory.split( "/" )
+                #Directory_Parent = Directory_Parent[ len( Directory_Parent ) -1 ]
+                #Filename_New = self.Get_Unique_Filename( Directory=Directory, Filename_Base=Filename_Base, Filename_Extension=Filename_Extension )
+                Filename_New = f"{Filename_Base}{Filename_Extension}" # Default case for unprocessed files
+                
+                if ( Filename_Extension == ".JPG" ):
+                    # rename to .jpg
+                    try:
+                        self.Logger.Log( f"Renaming Extension on: {File}" )
+                        #Filename_New = f"{Filename_Base}-{Filename_Date}{Filename_Extension.lower()}"
+                        Filename_New = f"{Filename_Base}{Filename_Extension.lower()}"
+                        os.rename( File, os.path.join( Directory, Filename_New ) )  # not renaming the file, only changing the extension
+                    except Exception as e:
+                        self.Logger.Log( f"Unable to rename: {File}", "Error" )
+                elif ( Filename_Extension.lower() == ".jpeg".lower() ):
+                    try:
+                        self.Logger.Log( f"Renaming Extension on: {File}" )
+                        Filename_New = self.Get_Unique_Filename( Directory=Directory, Filename_Base=Filename_Base, Filename_Extension=".jpg" )
+                        os.rename( File, os.path.join( Directory, Filename_New ) )  # not renaming the file, only changing the extension
+                    except Exception as e:
+                        self.Logger.Log( f"Unable to rename: {File}", "Error" )
+                elif ( Filename_Extension.lower() in self.Data_Types["Images_Convert"] ):
+                    self.Logger.Log( f"Converting: [[{Directory_Parent}]]\t{Filename_Base + Filename_Extension}" )
+                    if ( Filename_Extension.lower() == ".heic" ):
+                        try:
+                            Filename_New = self.Get_Unique_Filename( Directory=Directory, Filename_Base=f"{Filename_Base}-{Filename_Date}", Filename_Extension=".jpg" )
+                            with Image(filename=File ) as img:
+                                img.format = "jpeg"
+                                img.save( filename=os.path.join( Directory, Filename_New ) )
+                                if ( os.path.exists( os.path.join( Directory, Filename_New ) ) ):
+                                    self.Delete_File_With_Retries( File )
 
+                        except Exception as e:
+                            self.Logger.Log( f"Error processing: {File}\n{e}", "Error" )
+                    else:
+                        Filename_New = self.Get_Unique_Filename( Directory=Directory, Filename_Base=f"{Filename_Base}-{Filename_Date}", Filename_Extension=".jpg" )
+                        cmd = f"{os.path.join(self.Dir_FFMpeg, "ffmpeg.exe")} -hide_banner -loglevel error -i \"{File}\" \"{os.path.join( Directory, Filename_New )}\""
+                        cmd_Result = subprocess.run( cmd, shell=True, stdout=subprocess.PIPE,stderr=subprocess.PIPE )
+                        if ( cmd_Result.returncode != 0 ):
+                            Status = cmd_Result.stderr #.decode('utf-8')
+                            self.Logger.Log( f"Error in Thread_Image(), performing conversion:\n{cmd}\n\n{Status}", "Error" )
+                        else:
+                            self.Delete_File_With_Retries( File )
+
+                # For all files, resize
+                self.Image_Resize( Directory_Parent, Directory, Filename_New )
+
+            self.Progress.Update_Task( self.Tasks["Images"], Advance=1 )
+
+        except Exception as e:
+            self.Logger.Log( f"An error has occurred in Thread_Images():\n\t{str(e)}", "Error" )
+
+
+    #---------------------------------------------------------------------------------------------------------------#
+    # The Individual Thread dealing with Movies
+    #---------------------------------------------------------------------------------------------------------------#
+    def Thread_Movie( self, File ):
+        try: 
+            Filename           = os.path.basename( File )
+            Filename_Extension = os.path.splitext( File )[1]
+            Filename_Base      = os.path.splitext( Filename )[0]
+
+            File_Modified_date = datetime.fromtimestamp( os.path.getmtime( File ) )
+            Age = self.Today - File_Modified_date
+            
+            if ( Age.days < self.Age_Convert ):
+                # File is new
+                Filename_Date = datetime.now().strftime('%Y-%m-%d_%H24%M%S') # '2022-09-18_111632'
+                Directory = os.path.dirname(  File ) 
+                Directory_Parent = os.path.basename( Directory )
+                #Filename_New = Filename_Base + Filename_Extension
+                Filename_New = self.Get_Unique_Filename( Directory=Directory, Filename_Base=Filename_Base, Filename_Extension=Filename_Extension )
+                
                 if ( Filename_Extension == ".MP4" ):
                     # Rename to .mp4
-                    print( f"Renaming Extension on: {Media_File}" )
-                    try: 
+                    self.Logger.Log( f"Renaming Extension on: {File}" )
+                    try:
                         #Filename_New = Filename_Base + "-" + Filename_Date + '.mp4'
-                        os.rename( Media_File, Directory + os.sep + Filename_New )  # not renaming the file, only changing the extension
+                        Filename_New = Filename_New = Filename_Base + Filename_Extension.lower()
+                        os.rename( File, os.path.join( Directory, Filename_New ) )  # not renaming the file, only changing the extension
                     except Exception as e:
-                        print( "Unable to rename: " + Media_File )
+                        self.Logger.Log( f"Unable to rename: {File}", "Error" )
+                if ( Filename_Extension.lower() in self.Data_Types["Movies_Convert"] ):
+                    self.Logger.Log( f"Converting: /{Directory_Parent}\t{Filename_Base + Filename_Extension}" )
+                    
+                    Parser = createParser( File )
 
-                if ( Filename_Extension.lower() in self.Extensions_Movies_Convert ):
-                    print( "Converting [" + Directory_Parent + "]\t" + Filename_Base + Filename_Extension )
-                    parser = createParser( Media_File )
+                    if ( Parser ):
+                        File_Size_Before = os.path.getsize( File )
+                        self.Size_Before = self.Size_Before + File_Size_Before
 
-                    if ( parser ):
+                        # Attempt to extract metadata.  If not found, set to null
                         try:
-                            metadata = extractMetadata( parser )
+                            Metadata = extractMetadata( Parser )
                         except Exception as e:
-                            print( "Unable to extract Metadata %s " % e)
-                            metadata = None
-                        for info in metadata.exportPlaintext():
-                            if info.split(':')[0] == '- Creation date':
-                                date_temp = info.partition( "date: " )[2]
-                                #dateobj = datetime.strptime( info.split(':')[1].split()[0], "%Y-%m-%d" )
-                                #print( " temp: " + str( temp ) )
-                                dateobj = datetime.strptime( date_temp, "%Y-%m-%d %H:%M:%S" )
-                                #print( " Date: " + str( info ) )
-                                date_Metadata = str( dateobj.year ) + "-" + str( dateobj.month ) + "-" + str( dateobj.day ) + "_" + str( dateobj.hour ) + "-" + str( dateobj.minute ) + "-" + str( dateobj.second )
-                        parser.stream._input.close()
-                        Final_Filename = Filename_Base + "-" + date_Metadata + ".mp4"
+                            self.Logger.Log( f"Unable to extract Metadata\n{e}", "Error" )
+                            Metadata = None
+
+                        for Info in Metadata.exportPlaintext():
+                                if Info.split(':')[0] == '- Creation date':
+                                    Date_Temp = Info.partition( "date: " )[2]
+                                    Date_Object = datetime.strptime( Date_Temp, "%Y-%m-%d %H:%M:%S" )
+                                    #Date_Metadata = str( Date_Object.year ) + "-" + str( Date_Object.month ) + "-" + str( Date_Object.day ) + "_" + str( Date_Object.hour ) + "-" + str( Date_Object.minute ) + "-" + str( Date_Object.second )
+                                    Date_Metadata = f"{Date_Object.year}-{Date_Object.month}-{Date_Object.day}_{Date_Object.hour}-{Date_Object.minute}-{Date_Object.second}"
+                        Parser.stream._input.close()
+                        #Final_Filename = Filename_Base + "-" + Date_Metadata + ".mp4"
+                        Filename_New = self.Get_Unique_Filename( Directory=Directory, Filename_Base=f"{Filename_Base}-{Date_Metadata}", Filename_Extension=".mp4" )
                         # Attepting to convert the file
-                        #print( "ffmpeg -hide_banner -loglevel error -i " + "\"" + Media_File +  "\"" + " " + "\"" + Directory + os.sep + Final_Filename + "\" -map_metadata 1" )
-                        subprocess.run( "ffmpeg -hide_banner -loglevel error -i " + "\"" + Media_File +  "\"" + " " + "\"" + Directory + os.sep + Final_Filename + "\" -map_metadata 1", shell=True)
-                        if ( os.path.isfile( Directory + os.sep + Final_Filename ) ):
-                            # Copy the original metadata to the new file ( ex: preserve the create date )
-                            subprocess.run( self.Dir_Exiftool + os.sep + "exiftool.exe -q -overwrite_original -ee -TagsFromFile " + Media_File + " \"-FileCreateDate<CreationDate\" \"-CreateDate<CreationDate\" \"-ModifyDate<CreationDate\" \"" + Directory + os.sep + Final_Filename + "\" ", shell=True)
-                            os.remove(  Media_File )
+                        cmd = f"{os.path.join(self.Dir_FFMpeg, "ffmpeg.exe")} -hide_banner -loglevel error -i \"{File}\" \"{os.path.join( Directory, Filename_New )}\" -map_metadata 1"
+                        cmd_Result = subprocess.run( cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE )
+                        #print( cmd_Result )
+
+                        if ( cmd_Result.returncode != 0 ):
+                            Status = cmd_Result.stderr #.decode('utf-8')
+                            self.Logger.Log( f"Error in Thread_Movie(), performing conversion:\n{cmd}\n\n{Status}", "Error" )
                         else:
-                            print( "\tFile wasn't converted successfully" )
+                            if ( os.path.isfile( os.path.join( Directory, Filename_New ) ) ):
+                                # Copy the original metadata to the new file ( ex: preserve the create date )
+                                cmd = f"{os.path.join(self.Dir_Exiftool, "exiftool.exe")} -q -overwrite_original -ee -TagsFromFile \"{File}\" \"-FileCreateDate<CreationDate\" \"-CreateDate<CreationDate\" \"-ModifyDate<CreationDate\" \"{os.path.join(Directory, Filename_New)}\""
+                                #self.Logger.Log( f"cmd: {cmd}")
+                                #subprocess.run( self.Dir_Exiftool + os.sep + "exiftool.exe -q -overwrite_original -ee -TagsFromFile " + Media_File + " \"-FileCreateDate<CreationDate\" \"-CreateDate<CreationDate\" \"-ModifyDate<CreationDate\" \"" + Directory + os.sep + Final_Filename + "\" ", shell=True)
+                                cmd_Result = subprocess.run( cmd, shell=True, stdout=subprocess.PIPE,stderr=subprocess.PIPE )
+                                if ( cmd_Result.returncode != 0 ):
+                                    Status = cmd_Result.stderr #.decode('utf-8')
+                                    self.Logger.Log( f"Error in Thread_Movie(), writing metadata:\n{cmd}\n\n{Status}", "Error" )
+    
+                                self.Delete_File_With_Retries( File )
+                                File_Size_After = os.path.getsize( os.path.join( Directory, Filename_New ) )
+                                self.Size_After  = self.Size_After + File_Size_After
 
 
-                    Filename_New = Filename_Base + "-" + Filename_Date + '.mp4'
-
-                # will need to check size on all files
-                #Image_Resize( Directory_Parent, Directory, Filename_New )
-
-            except Exception as e:
-                print( "An Error has occurred while starting the Movie_Convert procedure: " + str( e ) + "\n\t" + Media_File )
-
-
-
-    #---------------------------------------------------------------------------------------------------------------#
-    # Function: Thread_Image_Convert
-    # Convert the indidivdual image
-    #---------------------------------------------------------------------------------------------------------------#
-    def Thread_Image_Convert( self, Media_File ):
-        Filename           = os.path.basename( Media_File )
-        Filename_Extension = os.path.splitext(Media_File)[1]
-        Filename_Base      = os.path.splitext(Filename)[0]
-
-        File_Modified_date = datetime.fromtimestamp( os.path.getmtime( Media_File ) )
-        Age = self.Today - File_Modified_date
-        if ( Age.days < self.Age_Convert ):
-
-            try:
-                Filename_Date = datetime.now().strftime('%Y-%m-%d_%H24%M%S') # '2022-09-18_111632'
-                Directory = os.path.dirname( Media_File ) 
-                #Directory_Parent = Directory.split( os.sep )
-                Directory_Parent = Directory.split( "/" )
-                Directory_Parent = Directory_Parent[ len( Directory_Parent ) -1 ]
-                Filename_New = f"{Filename_Base}{Filename_Extension}"
-                #print( "Directory: " + Directory + " Filename_Base: " + Filename_Base + "\tFilename_Extension" + Filename_Extension)
-                if ( Filename_Extension == ".JPG" ):
-                    # Rename to .jpg
-                    #print( "Renaming Extension on : " + Media_File )
-                    print( f"Renaming Extension on : {Filename_Base}" )
-                    try: 
-                        Filename_New = f"{Filename_Base}-{Filename_Date}.jpg"
-                        #print( f"to: {Filename_New}" )
-                        #time.sleep(10)
-                        #os.rename( Media_File, Directory + os.sep + Filename_New )
-                        shutil.move( Media_File, Directory + os.sep + Filename_New )
-                        #os.rename( Media_File, Filename_New )  # not renaming the file, only changing the extension
-                    except Exception as e:
-                        print( f"Unable to rename: {Media_File}\n\t{str(e)}" )
-                if ( Filename_Extension.lower() == ".jpeg".lower() ):
-                    # Rename to .jpg
-                    print( "Renaming Extension on : " + Media_File )
-                    try: 
-                        Filename_New = f"{Filename_Base}-{Filename_Date}.jpg"
-                        os.rename( Media_File, Directory + os.sep + Filename_New )
-                    except Exception as e:
-                        print( "Unable to rename: " + Media_File )
-  
-                if ( Filename_Extension.lower() in self.Extensions_Images_Convert ):
-                    if ( Filename_Extension.lower() == ".heic" ):
-                        print( "Converting [" + Directory + "]\t" + Filename_Base + Filename_Extension)
-                        try:
-                            Filename_New = f"{Filename_Base}-{Filename_Date}.jpg"
-                            # Convert HEIC to JPG using wand
-                            with Image(filename=Media_File ) as img:
-                                #Exif_Orientation = img.metadata.get("exif:Orientation", 1)
-                                # ... (orientation correction logic as before) ...
-                                img.format = "jpeg"
-                                img.save(filename=os.path.join( Directory, Filename_New ) )
-                                if ( os.path.exists( os.path.join( Directory, Filename_New ) ) ):
-                                    os.remove( Media_File )
-
-                        except Exception as e:
-                            print(f"Error processing {Filename_Base}: {e}")  # Handle potential errors
                     else:
+                        self.Logger.Log( f"Unable to parse file for metadata", "Error" )
+                   
 
-                        print( f"Converting [{Directory_Parent}]\t{Filename_Base}{Filename_Extension}" )
-                        subprocess.run( "ffmpeg -hide_banner -loglevel error -i " + "\"" + Media_File +  "\"" + " " + "\"" + Directory + os.sep + Filename_Base + "-" + Filename_Date + '.jpg' + "\"", shell=True)
-                        os.remove(  Media_File )
-                        Filename_New = Filename_Base + "-" + Filename_Date + '.jpg'
+            self.Progress.Update_Task( self.Tasks["Movies"], Advance=1 )
 
-                # will need to check size on all files
-                self.Image_Resize( Directory_Parent, Directory, Filename_New )
-            except Exception as e:
-                print( f"An Error has occurred in Thread_Image_Convert(): {e}\n\t{Media_File}" )
-
+        except Exception as e:
+            self.Logger.Log( f"An error has occurred in Thread_Movie():\n\t{File}\n\t{str(e)}", "Error" )
 
     #---------------------------------------------------------------------------------------------------------------#
-    # Function: Image_Resize
     # Reisizes images based on the height and width limits.  This is done to help reduce file size issues
     #---------------------------------------------------------------------------------------------------------------#
     def Image_Resize( self, Directory_Parent, Directory, Filename ):
         try:
-            Width_Limit = 2000
-            Height_Limit = 1500
-            Message = "\n  [" + Directory_Parent + "]\t" + Filename
-            #Log_Info( "      Checking size on: " + file )
+            #self.Logger.Log( f"Resizing: [[{Directory_Parent}]]\t{Filename}" )
             Path_Check = f"{Directory}\\{Filename}"
-            Command = f"ffprobe -v error -select_streams v -show_entries stream=width,height -of csv=p=0:s=x \"{Path_Check}\""
-            #Command = f"ffprobe -v error -select_streams v -show_entries stream=width,height -of csv=p=0:s=x {os.sep}{Path_Check}{os.sep}"
-            #process = subprocess.run( "ffprobe -v error -select_streams v -show_entries stream=width,height -of csv=p=0:s=x " + "\"" + Path_Check + "\"", shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
-            process = subprocess.run( Command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
-            output = process.stdout
-            #print( f"\n***DEBUG:\nprocess = {process}\nCommand = {Command}" )
-            #Log_Info( "      " + str( output ) )
-            try:
-                Check_Width = int( output.split("x")[0] )
-                Check_Height = int( output.split("x")[1] )
-            except:
-                Message = f"{Message}\n\t*** Invalid file\n{process.stdout}"
-                #print( f"{Message}" )
-                #print( "\t[" + Directory_Parent + "]\t" + Filename + "\n\t\t " + Message )
-                #print( "*** Invalid file: " + Path_Check)
-                return
+            cmd = f"{os.path.join(self.Dir_FFMpeg, "ffprobe.exe")} -v error -select_streams v -show_entries stream=width,height -of csv=p=0:s=x \"{Path_Check}\""
 
-            #print( f"\n***DEBUG A: Filename: {Filename}" + 
-            #       f"\nCheck_Width: {Check_Width}" +
-            #       f"\nCheck_Height: {Check_Height}" +
-            #       f"\nWidth_Limit: {Width_Limit}" +
-            #       f"\nHeight_Limit: {Height_Limit}"
-            #    )
-            #print( f"Output: {output}" )
-            #print( f"Check_Width: {Check_Width}" )
-            #print( f"Check_Height: {Check_Height}" )
-            #print( f"Width_Limit: {Width_Limit}" )
-            #print( f"Height_Limit: {Height_Limit}" )
-            #print( f"{Message}\n\tWidth:\t{Check_Width}" )
-            #print( f"{Message}\n\tHeight:\t{Check_Height}" )
-            if ( Check_Width > Width_Limit ) or ( Check_Height > Height_Limit ):
-                #print( f"\n***DEBUG" )
-                Message = f"{Message}\n\tReducing Size"
-                Message = f"{Message}\n\tWidth:\t{Check_Width}"
-                Message = f"{Message}\n\tHeight:\t{Check_Height}"
-                File_Size_Pre = os.path.getsize( Path_Check )
-                Command = f"ffmpeg -y -hide_banner -loglevel error -i \"{Path_Check}\" -vf scale='min(2000,iw)':min'(1500,ih)':force_original_aspect_ratio=decrease \"{Path_Check}\""
-                #print( f"\n***DEBUG:\nCommand = {Command}" )
-                #process_resize = subprocess.run( "ffmpeg -y -hide_banner -loglevel error -i " + "\"" + Path_Check + "\"" + " -vf scale='min(2000,iw)':min'(1500,ih)':force_original_aspect_ratio=decrease " + "\"" + Path_Check + "\"", shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
-                process_resize = subprocess.run( Command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
-                #print( f"\n***DEBUG:\nprocess = {process_resize}\nCommand = {Command}" )
-                output_resize = process_resize.stdout
-                File_Size_Post = os.path.getsize( Path_Check )
-                Message = f"{Message}\n\tSize Pre:\t{self.Human_Readable_Size( File_Size_Pre, 2 )}"
-                Message = f"{Message}\n\tSize After:\t{self.Human_Readable_Size( File_Size_Post, 2 )}"
-                Message = f"{Message}\n\tSize Saved:\t{self.Human_Readable_Size( File_Size_Pre - File_Size_Post, 2 )}"
-                print( f"{Message}" )
-                #print( f"***DEBUG D: Filename_Extension: {Filename_Extension}" )
+            cmd_Result = subprocess.run( cmd, shell=True, stdout=subprocess.PIPE )
+            #process = subprocess.run( Command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+            #output = cmd_Result.stdout
+            if ( cmd_Result.returncode != 0 ):
+                Status = cmd_Result.stderr #.decode('utf-8')
+                self.Logger.Log( f"Error in Image_Resize(): ffprobe\n{cmd}\n\n{Status}", "Error" )
+            else:
+                #self.Logger.Log( f"stdout.split(x)[0]: {cmd_Result.stdout}", "Debug" )
+                # Decode the output
+                try:
+                    Output = cmd_Result.stdout.decode().strip()
+                    Check_Width, Check_Height = Output.split('x')
+                    Check_Width  = int( Check_Width )
+                    Check_Height = int( Check_Height )
+                    #self.Logger.Log( f"\tWidth: {Check_Width}\tHeight: {Check_Height}\t{Filename}", "Debug" )
+                except Exception as e:
+                    self.Logger.Log( f"Error in Image_Resize(): Checking Size\n{e}", "Error" )
+                if ( Check_Width > self.Width_Limit ) or ( Check_Height > self.Height_Limit ):
+                    Directory_Parent = os.path.basename( Directory )
+                    self.Logger.Log( f"\tWidth: {Check_Width}\tHeight: {Check_Height}\t{Directory_Parent}/{Filename}", "Debug" )
+                    File_Size_Before = os.path.getsize( Path_Check )
+                    self.Size_Before = self.Size_Before + File_Size_Before
+
+                    Filename_Extension = os.path.splitext( Filename )[1]
+                    Filename_Base      = os.path.splitext( Filename )[0]
+                    
+                    Filename_New = self.Get_Unique_Filename( Directory=Directory, Filename_Base=f"{Filename_Base}", Filename_Extension=Filename_Extension )
+                    Filename_New = os.path.join( Directory, Filename_New )
+                    # This is not copying the metadata across correctly.  Will need to copy it manually
+                    cmd = f"{os.path.join(self.Dir_FFMpeg, "ffmpeg.exe")} -y -hide_banner -loglevel error -i \"{Path_Check}\" -vf scale='min({self.Width_Limit},iw)':min'({self.Height_Limit},ih)':force_original_aspect_ratio=decrease -map_metadata 0 \"{Filename_New}\""
+                    cmd_Result = subprocess.run( cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True )
+                    #cmd_Result = subprocess.run( cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)                    
+                    
+                    if ( cmd_Result.returncode != 0 ):
+                        Status = cmd_Result.stderr #.decode('utf-8')
+                        self.Logger.Log( f"Error in Image_Resize(): resize\n{cmd}\n\n{cmd_Result.returncode}\n\n{Status}", "Error" )
+                        #self.Logger.Log( f"{cmd_Result}", "Error" )
+                    else:
+                        cmd = f"{os.path.join(self.Dir_Exiftool, "exiftool.exe")} -q -overwrite_original -ee -TagsFromFile \"{os.path.join( Directory, Filename)}\" -all:all \"{Filename_New}\""
+                        cmd_Result = subprocess.run( cmd, shell=True, stdout=subprocess.PIPE,stderr=subprocess.PIPE )
+                        if ( cmd_Result.returncode != 0 ):
+                            Status = cmd_Result.stderr #.decode('utf-8')
+                            self.Logger.Log( f"Error in Image_Resize(), writing metadata:\n{cmd}\n\n{Status}", "Error" )
+                            self.Delete_File_With_Retries( Filename_New )
+                        else:
+                            self.Delete_File_With_Retries( os.path.join( Directory, Filename ) )
+                            os.rename( Filename_New, os.path.join( Directory, Filename ) )
+
+                        File_Size_After = os.path.getsize( Path_Check )
+                        self.Size_After  = self.Size_After + File_Size_After
+                        self.Logger.Log( f"\tPresize: {self.Human_Readable_Size( File_Size_Before )}\tPostsize: {self.Human_Readable_Size( File_Size_After )}\t{Filename}" )
+
         except Exception as e:
-            print( f"An Error has occurred in Image_Resize():\n\t{e}" )
+            self.Logger.Log( f"An Error has occurred in Image_Resize():\n\t{e}", "Error" )
+        
+
     #---------------------------------------------------------------------------------------------------------------#
-    # Function: Human_Readable_Size
     # Display file sizes in a human readable format
     # Returns human readable string
     #---------------------------------------------------------------------------------------------------------------#
-    def Human_Readable_Size( self, size, decimal_places=2):
+    def Human_Readable_Size( self, size, decimal_places=2 ):
         try:
             for unit in ['B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB']:
                 if size < 1024.0 or unit == 'PiB':
@@ -586,24 +445,59 @@ class APP( ):
         except Exception as e:
             print( f"An Error has occurred in Human_Readable_Size():\n\t{e}" )
 
+    #---------------------------------------------------------------------------------------------------------------#
+    # Ensures the filename is unique by appending a counter if necessary
+    #---------------------------------------------------------------------------------------------------------------#
+    def Get_Unique_Filename( self, Directory, Filename_Base, Filename_Extension, Max_Attempts=10 ):
+        Counter = 0
+        Filename_New = Filename_Base + Filename_Extension
+
+        while os.path.exists( os.path.join( Directory, Filename_New ) ):
+            Counter += 1
+            if Counter > Max_Attempts:
+                raise Exception(f"Error: Unable to find a unique filename after {Max_Attempts} attempts.")
+            Filename_New = f"{Filename_Base}_{Counter}{Filename_Extension}"
+        
+        return Filename_New
+
+    #---------------------------------------------------------------------------------------------------------------#
+    # Final Stats
+    #---------------------------------------------------------------------------------------------------------------#
+    def Report( self ):
+        print()
+        self.Logger.Log( f"\tTotal Directories Processed: {len( self.Media['Directories'])}" )
+        self.Logger.Log( f"\tTotal Files Processed: {len( self.Media['Files'])}" )
+        self.Logger.Log( f"\tTotal Deletes: {len( self.Media['Movies'])}" )
+        self.Logger.Log( f"\tTotal Images: {len( self.Media['Images'])}" )
+        self.Logger.Log( f"\tTotal Others: {len( self.Media['Others'])}" )
+        print()
+        self.Logger.Log( f"\tTotal Size Before: {self.Human_Readable_Size( self.Size_Before )}" )
+        self.Logger.Log( f"\tTotal Size After:  {self.Human_Readable_Size( self.Size_After )}" )
+        self.Logger.Log( f"\tTotal Size Saved:  {self.Human_Readable_Size( self.Size_Before - self.Size_After )}" )
+        print()
+
+    #---------------------------------------------------------------------------------------------------------------#
+    # Function: Delete_File_With_Retries
+    # Tries to delete a file with a specified number of retries.
+    # Logs an error message if unable to delete the file after the retries.
+    #---------------------------------------------------------------------------------------------------------------#
+    def Delete_File_With_Retries( self, File, Retries=3, Delay=1 ):
+        for Attempt in range( Retries ):
+            try:
+                os.remove( File )
+                break
+            except Exception as e:
+                if Attempt < Retries - 1:
+                    sleep( Delay )  # Wait before retrying
+                else:
+                    self.Logger.Log( f"Unable to delete: {File}\n\t{e}", "Error" )
+
+
 #---------------------------------------------------------------------------------------------------------------#
-# Main start
+# Main Processing
 #---------------------------------------------------------------------------------------------------------------#
-if __name__ == '__main__':
-    #parser = argparse.ArgumentParser()
-    #folder_base = r"D:/Data/Pics/Atlanta United/ATLUTD VIPs/pics"
-
-    #parser.add_argument( "-i", "--input", help="mp3 path, ex: " + folder_base, required=False )
-    #args = parser.parse_args()
-    #if not args.input:
-    #    folder_base = r"D:/Data/Pics/Atlanta United/ATLUTD VIPs/pics"
-    #    print( f"Using default base directory: {folder_base}" )
-
-
-    App = APP()
-    print( f"______________________________________" )
-    print( f"Investigate Media in the  following locations" )
-    print( f"" )
+if __name__ == "__main__":
+    App = Fix_Files()
 
     App.Add_Directory( r"D:/Data/Pics/Atlanta United/ATLUTD VIPs/Games" )
     App.Add_Directory( r"D:/Data/Pics/Atlanta United/ATLUTD VIPs/Games - ATLUTD2" )
@@ -611,10 +505,9 @@ if __name__ == '__main__':
     App.Add_Directory( r"D:/Data/Pics/Atlanta United/ATLUTD VIPs/Dates" )
     App.Add_Directory( r"D:/Data/Pics/Atlanta United/ATLUTD VIPs/art" )
     App.Add_Directory( r"D:/Data/Pics/Atlanta United/ATLUTD VIPs/pics" )
-    #App.Add_Directory( r"D:/Data/Pics/Atlanta United/ATLUTD VIPs/Games/2024" )
-
-    
+    App.Add_Directory( r"D:/Data/Pics/Atlanta United/ATLUTD VIPs/temp" )
 
     App.Build_File_List()
     App.Process_Files()
-
+    App.Report()
+    print()
