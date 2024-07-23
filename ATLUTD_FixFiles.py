@@ -27,7 +27,8 @@ from hachoir.parser import createParser                          # hachoir is us
 from hachoir.metadata import extractMetadata                     # working with movie metadata
 from wand.image import Image                                     # ability to work with heic files
 from time import sleep                                           # ability to introduce time delays
-
+import tempfile                                                  # ability to create temporary files/directories per thread
+import shutil                                                    # Copy files
 
 #---------------------------------------------------------------------------------------------------------------#
 # Class: Album_Parser
@@ -60,8 +61,7 @@ class Fix_Files():
         "Images":         [ '.jpg', '.jpeg', '.webp', '.jfif', '.png', '.heic', '.avif' ],
         "Images_Convert": [ '.webp', '.jfif', '.png', '.heic', '.avif' ],
         "Movies":         [ '.mp4', '.mov' ],
-        "Movies_Convert": [ '.mov' ],
-
+        "Movies_Convert": [ '.mov' ]
     }
 
     Threads = {
@@ -225,10 +225,6 @@ class Fix_Files():
                 self.Logger.Log( f"Processing: /{Directory_Parent}\t{Filename}" )
                 Filename_Date = datetime.now().strftime('%Y-%m-%d_%H24%M%S') # '2022-09-18_111632'
                 Directory = os.path.dirname( File ) 
-                #Directory_Parent = Directory.split( os.sep )
-                #Directory_Parent = Directory.split( "/" )
-                #Directory_Parent = Directory_Parent[ len( Directory_Parent ) -1 ]
-                #Filename_New = self.Get_Unique_Filename( Directory=Directory, Filename_Base=Filename_Base, Filename_Extension=Filename_Extension )
                 Filename_New = f"{Filename_Base}{Filename_Extension}" # Default case for unprocessed files
                 
                 if ( Filename_Extension == ".JPG" ):
@@ -266,6 +262,9 @@ class Fix_Files():
                         cmd_Result = subprocess.run( cmd, shell=True, stdout=subprocess.PIPE,stderr=subprocess.PIPE )
                         if ( cmd_Result.returncode != 0 ):
                             Status = cmd_Result.stderr #.decode('utf-8')
+                            if ( isinstance( Status, bytes ) ):
+                                Status = Status.decode('utf-8')
+                                #Status = cmd_Result.stderr #.decode('utf-8')
                             self.Logger.Log( f"Error in Thread_Image(), performing conversion:\n{cmd}\n\n{Status}", "Error" )
                         else:
                             self.Delete_File_With_Retries( File )
@@ -340,16 +339,21 @@ class Fix_Files():
 
                         if ( cmd_Result.returncode != 0 ):
                             Status = cmd_Result.stderr #.decode('utf-8')
+                            if ( isinstance( Status, bytes ) ):
+                                Status = Status.decode('utf-8')
+                            #Status = cmd_Result.stderr #.decode('utf-8')
                             self.Logger.Log( f"Error in Thread_Movie(), performing conversion:\n{cmd}\n\n{Status}", "Error" )
                         else:
                             if ( os.path.isfile( os.path.join( Directory, Filename_New ) ) ):
                                 # Copy the original metadata to the new file ( ex: preserve the create date )
                                 cmd = f"{os.path.join(self.Dir_Exiftool, "exiftool.exe")} -q -overwrite_original -ee -TagsFromFile \"{File}\" \"-FileCreateDate<CreationDate\" \"-CreateDate<CreationDate\" \"-ModifyDate<CreationDate\" \"{os.path.join(Directory, Filename_New)}\""
                                 #self.Logger.Log( f"cmd: {cmd}")
-                                #subprocess.run( self.Dir_Exiftool + os.sep + "exiftool.exe -q -overwrite_original -ee -TagsFromFile " + Media_File + " \"-FileCreateDate<CreationDate\" \"-CreateDate<CreationDate\" \"-ModifyDate<CreationDate\" \"" + Directory + os.sep + Final_Filename + "\" ", shell=True)
                                 cmd_Result = subprocess.run( cmd, shell=True, stdout=subprocess.PIPE,stderr=subprocess.PIPE )
                                 if ( cmd_Result.returncode != 0 ):
                                     Status = cmd_Result.stderr #.decode('utf-8')
+                                    if ( isinstance( Status, bytes ) ):
+                                        Status = Status.decode('utf-8')
+                                    #Status = cmd_Result.stderr #.decode('utf-8')
                                     self.Logger.Log( f"Error in Thread_Movie(), writing metadata:\n{cmd}\n\n{Status}", "Error" )
     
                                 self.Delete_File_With_Retries( File )
@@ -380,6 +384,9 @@ class Fix_Files():
             #output = cmd_Result.stdout
             if ( cmd_Result.returncode != 0 ):
                 Status = cmd_Result.stderr #.decode('utf-8')
+                if ( isinstance( Status, bytes ) ):
+                    Status = Status.decode('utf-8')
+                #Status = cmd_Result.stderr #.decode('utf-8')
                 self.Logger.Log( f"Error in Image_Resize(): ffprobe\n{cmd}\n\n{Status}", "Error" )
             else:
                 #self.Logger.Log( f"stdout.split(x)[0]: {cmd_Result.stdout}", "Debug" )
@@ -410,26 +417,70 @@ class Fix_Files():
                     
                     if ( cmd_Result.returncode != 0 ):
                         Status = cmd_Result.stderr #.decode('utf-8')
+                        if ( isinstance( Status, bytes ) ):
+                            Status = Status.decode('utf-8')
+                        #Status = cmd_Result.stderr #.decode('utf-8')
                         self.Logger.Log( f"Error in Image_Resize(): resize\n{cmd}\n\n{cmd_Result.returncode}\n\n{Status}", "Error" )
                         #self.Logger.Log( f"{cmd_Result}", "Error" )
                     else:
-                        cmd = f"{os.path.join(self.Dir_Exiftool, "exiftool.exe")} -q -overwrite_original -ee -TagsFromFile \"{os.path.join( Directory, Filename)}\" -all:all \"{Filename_New}\""
-                        cmd_Result = subprocess.run( cmd, shell=True, stdout=subprocess.PIPE,stderr=subprocess.PIPE )
-                        if ( cmd_Result.returncode != 0 ):
-                            Status = cmd_Result.stderr #.decode('utf-8')
-                            self.Logger.Log( f"Error in Image_Resize(), writing metadata:\n{cmd}\n\n{Status}", "Error" )
-                            self.Delete_File_With_Retries( Filename_New )
-                        else:
-                            self.Delete_File_With_Retries( os.path.join( Directory, Filename ) )
+                        Test = self.Exiftool( os.path.join( Directory, Filename_New ) )
+                        if ( Test ):
+                            os.remove( os.path.join( Directory, Filename ) )
                             os.rename( Filename_New, os.path.join( Directory, Filename ) )
-
-                        File_Size_After = os.path.getsize( Path_Check )
-                        self.Size_After  = self.Size_After + File_Size_After
-                        self.Logger.Log( f"\tPresize: {self.Human_Readable_Size( File_Size_Before )}\tPostsize: {self.Human_Readable_Size( File_Size_After )}\t{Filename}" )
+                            File_Size_After = os.path.getsize( Path_Check )
+                            self.Size_After  = self.Size_After + File_Size_After
+                            self.Logger.Log( f"\tPresize: {self.Human_Readable_Size( File_Size_Before )}\tPostsize: {self.Human_Readable_Size( File_Size_After )}\t{Filename}" )
+                        else:
+                            os.remove( Filename_New )
 
         except Exception as e:
             self.Logger.Log( f"An Error has occurred in Image_Resize():\n\t{e}", "Error" )
         
+    #---------------------------------------------------------------------------------------------------------------#
+    # Perform the exiftool.exe
+    # The real issue was that exiftool has a size limitation on the filename/path.  If filenames/path exceeded the 
+    # size limit, exiftool errors out indicating "does not exist for -tagsFromFile option".  It falsly indicates the 
+    # file cannot be found.
+    #---------------------------------------------------------------------------------------------------------------#
+    def Exiftool( self, File_Input ):
+        Test = False
+        # Create a unique temporary directory
+        Temp_Dir = tempfile.mkdtemp()
+
+        # Create a short, unique name for the original file
+        Temp_Filename_Original = os.path.join( Temp_Dir, "temp_original.jpg" )
+
+        # Create a short, unique name for the original file
+        Temp_Filename_New = os.path.join( Temp_Dir, "temp_new.jpg" )
+
+        # Copy the files to the temporary directory
+        shutil.copy2( File_Input, Temp_Filename_Original )
+        shutil.copy2( File_Input, Temp_Filename_New )
+
+        try:
+
+            cmd = f"{os.path.join( self.Dir_Exiftool, 'exiftool.exe' )} -q -overwrite_original -ee -TagsFromFile \"{Temp_Filename_Original}\" -all:all \"{Temp_Filename_New}\""
+            cmd_Result = subprocess.run( cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True )
+
+            if ( cmd_Result.returncode != 0 ):
+                Status = cmd_Result.stderr #.decode('utf-8')
+                #if ( isinstance( Status, bytes ) ):
+                #    Status = Status.decode('utf-8')
+                self.Logger.Log( f"Error in Exiftool(), writing metadata:\n[yellow]{cmd}[/yellow][red]\n\n{Status}[/red]", "Error" )
+            else:
+                # Move the processed file back to its original location with the original name
+                shutil.move( Temp_Filename_New, File_Input )
+                Test = True
+
+        except Exception as e:
+            self.Logger.Log( f"An Error has occurred in Exiftool():\n\t{e}", "Error" )
+            Test = False
+
+        finally:
+            shutil.rmtree( Temp_Dir )
+            return Test
+
+
 
     #---------------------------------------------------------------------------------------------------------------#
     # Display file sizes in a human readable format
@@ -459,6 +510,12 @@ class Fix_Files():
             Filename_New = f"{Filename_Base}_{Counter}{Filename_Extension}"
         
         return Filename_New
+
+    def to_unc( self, path ):
+
+        return '\\\\?\\' + os.path.abspath(path)
+        
+
 
     #---------------------------------------------------------------------------------------------------------------#
     # Final Stats
