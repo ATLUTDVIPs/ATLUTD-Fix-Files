@@ -425,6 +425,11 @@ class Fix_Files():
                     else:
                         Test = self.Exiftool( os.path.join( Directory, Filename_New ) )
                         if ( Test ):
+                            # Get original file's timestamps
+                            Original_stat = os.stat( os.path.join( Directory, Filename ) )
+                            # Update the new file's timestamps to match the original
+                            os.utime( Filename_New, ( Original_stat.st_atime, Original_stat.st_mtime ) )
+
                             os.remove( os.path.join( Directory, Filename ) )
                             os.rename( Filename_New, os.path.join( Directory, Filename ) )
                             File_Size_After = os.path.getsize( Path_Check )
@@ -468,6 +473,10 @@ class Fix_Files():
                 #    Status = Status.decode('utf-8')
                 self.Logger.Log( f"Error in Exiftool(), writing metadata:\n[yellow]{cmd}[/yellow][red]\n\n{Status}[/red]", "Error" )
             else:
+                # Get original file's timestamps
+                Original_stat = os.stat( File_Input )
+                # Update the new file's timestamps to match the original
+                os.utime( Temp_Filename_New, ( Original_stat.st_atime, Original_stat.st_mtime ) )
                 # Move the processed file back to its original location with the original name
                 shutil.move( Temp_Filename_New, File_Input )
                 Test = True
