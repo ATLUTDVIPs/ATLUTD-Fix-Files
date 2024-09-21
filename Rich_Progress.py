@@ -146,7 +146,7 @@ class Rich_Progress:
         try:
             #print( f"Add_Task: {description}" )
             with self.Task_Lock:
-                Task_ID = self.Progress_Detailed.add_task( Description, total=Total )
+                Task_ID = self.Progress_Detailed.add_task( Description, total=Total, visible=False )
                 #self.Tasks[Task_ID] = {"total": Total, "completed": 0, "visible": True, "description": Description}
                 self.Update_Total_Progress()
                 return Task_ID
@@ -174,7 +174,7 @@ class Rich_Progress:
     # Function: Update_Task
     # Update the progress of a detailed task.
     #---------------------------------------------------------------------------------------------------------------#
-    def Update_Task(self, Task_ID, Advance=None, Total=None, Description=None, State=None ):
+    def Update_Task(self, Task_ID, Advance=None, Total=None, Description=None, State=None, Visible=None ):
         try:
             with self.Task_Lock:
                 if ( Advance is not None ):
@@ -191,6 +191,8 @@ class Rich_Progress:
                     #self.Tasks[Task_ID]["description"] = Description
                 if ( State is not None ):
                     self.Progress_Detailed.update(Task_ID, state=State )
+                if ( Visible is not None ):
+                    self.Progress_Detailed.update(Task_ID, visible=Visible )
                 self.Update_Total_Progress()
         except Exception as e:
             print( f"An Error occurred in Update_Task():\n{e}" )
@@ -239,10 +241,10 @@ class Rich_Progress:
     #---------------------------------------------------------------------------------------------------------------#
     def Hide_Task(self, Task_ID):
         with self.Task_Lock:
-            if Task_ID in self.Tasks:
-                self.Progress_Detailed.update(Task_ID, visible=False)
-                self.Tasks[Task_ID]["visible"] = False
-                self.Update_Total_Progress()
+            #if Task_ID in self.Tasks:
+            self.Progress_Detailed.update(Task_ID, visible=False)
+            #    self.Tasks[Task_ID]["visible"] = False
+            self.Update_Total_Progress()
 
 
     #---------------------------------------------------------------------------------------------------------------#
