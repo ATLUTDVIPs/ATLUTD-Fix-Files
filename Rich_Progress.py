@@ -54,6 +54,12 @@ class CustomStateColumn(ProgressColumn):
 # A class to manage rich progress bars for total and detailed progress tracking.
 #---------------------------------------------------------------------------------------------------------------#
 class Rich_Progress:
+    Live = None
+    Length_Description = 40  # Default length for descriptions in the first column
+
+    #---------------------------------------------------------------------------------------------------------------#
+    # Class Initialization
+    #---------------------------------------------------------------------------------------------------------------#
     def __init__(self):
         self.Console = Console()
         #self.Console = Console( 
@@ -65,18 +71,6 @@ class Rich_Progress:
         #        }
         #    ) 
         #)
-        self.Progress_Detailed = Progress(
-            TextColumn("[progress.description]{task.description}"),
-            SpinnerColumn(),
-            BarColumn(),
-            #DynamicColorBarColumn(),
-            CustomStateColumn(),
-            "[progress.percentage]{task.percentage:>3.1f}%",
-            TimeElapsedColumn(),
-            console=self.Console,
-            transient=True
-        )
-
         self.Progress_Overall = Progress(
             TextColumn("[progress.description]{task.description}"),
             SpinnerColumn(),
@@ -85,31 +79,54 @@ class Rich_Progress:
             "[progress.percentage]{task.percentage:>3.1f}%",
             TimeElapsedColumn(),
             console=self.Console,
-            transient=False
+            transient=True,
+            expand=True
+        )
+
+        self.Progress_Detailed = Progress(
+            TextColumn( "[progress.description]{task.description}"),
+            #TextColumn(lambda task: f"{task.description[:40]}"),
+            SpinnerColumn(),
+            BarColumn(),
+            #DynamicColorBarColumn(),
+            CustomStateColumn(),
+            "[progress.percentage]{task.percentage:>3.1f}%",
+            TimeElapsedColumn(),
+            console=self.Console,
+            transient=True,
+            expand=True
         )
 
         self.Progress_Sleep = Progress(
-            TextColumn("[progress.description]{task.description}"),
+            TextColumn( "[progress.description]{task.description:<40}" ),
             SpinnerColumn(),
             BarColumn(),
             #DynamicColorBarColumn(),
             "[progress.percentage]{task.percentage:>3.1f}%",
             TimeElapsedColumn(),
-            console=self.Console,
-            transient=False
+            console=self.Console,                    #,
+            transient=True,  # Mark transient to allow reusing the row
+            expand=True
         )
-        
-        self.Progress_Table = Table.grid()
 
+
+        self.Progress_Table = Table.grid()
+        self.Progress_Table.min_width = 120
+        
         self.Task_Lock = Lock()
-        #self.Tasks = {}
-        self.Total_Task_ID = self.Progress_Overall.add_task("[blue]Total Progress", total=100)
+        Text_Total = f"[blue]Total Progress"
+        if ( len( Text_Total ) > self.Length_Description ):
+            Text_Total = Text_Total[:self.Length_Description]  # Truncate if too long
+        else:
+            Text_Total = Text_Total.ljust( self.Length_Description )  # Pad if too short
+
+        self.Total_Task_ID = self.Progress_Overall.add_task( Text_Total, total=100 )
 
     #---------------------------------------------------------------------------------------------------------------#
     # Function: Start
     # Start the rich progress context manager.
     #---------------------------------------------------------------------------------------------------------------#
-    def Start(self, Text_Overall="Overall Progress", Text_Detailed="Detailed Progress" ):
+    def Start( self, Text_Overall="Overall Progress", Text_Detailed="Detailed Progress" ):
         #self.Live = Live(
         #    Group(
         #        Panel( self.Progress_Overall, title=Text_Overall, padding=( 1, 2) ),
@@ -118,6 +135,7 @@ class Rich_Progress:
         #    console=self.Console,
         #    refresh_per_second=10
         #)
+
         self.Progress_Table.add_row( 
             Panel.fit( self.Progress_Overall, title= Text_Overall, padding= ( 1, 2 ) )
         )
@@ -125,7 +143,7 @@ class Rich_Progress:
             Panel.fit( self.Progress_Detailed, title= Text_Detailed, padding= ( 1, 2 ) )
         )
         self.Progress_Table.add_row( 
-            Panel.fit( self.Progress_Sleep, title= "Sleeping", padding= ( 0, 0 ) )
+            Panel.fit( self.Progress_Sleep, title= "", padding= ( 0, 0 ), border_style = "black on black" )
         )
         self.Live = Live ( self.Progress_Table )
         self.Live.start()
@@ -146,26 +164,16 @@ class Rich_Progress:
         try:
             #print( f"Add_Task: {description}" )
             with self.Task_Lock:
+                if ( Description ):
+                    if ( len( Description ) > self.Length_Description ):
+                        Description = Description[:self.Length_Description]  # Truncate if too long
+                    else:
+                        Description = Description.ljust( self.Length_Description )  # Pad if too short
+
                 Task_ID = self.Progress_Detailed.add_task( Description, total=Total, visible=False )
                 #self.Tasks[Task_ID] = {"total": Total, "completed": 0, "visible": True, "description": Description}
                 self.Update_Total_Progress()
                 return Task_ID
-        except Exception as e:
-            print( f"An Error occurred in Add_Task():\n{e}" )
-
-    #---------------------------------------------------------------------------------------------------------------#
-    # Function: Add_Task
-    # Add a new detailed task.
-    # Returns the task ID.
-    #---------------------------------------------------------------------------------------------------------------#
-    def Add_Sleep(self, Description, Seconds ):
-        try:
-            #print( f"Add_Task: {description}" )
-            #with self.Task_Lock:
-            Task_ID = self.Progress_Sleep.add_task( Description, total=Seconds )
-            #self.Tasks[Task_ID] = {"total": Total, "completed": 0, "visible": True, "description": Description}
-            #self.Update_Total_Progress()
-            return Task_ID
         except Exception as e:
             print( f"An Error occurred in Add_Task():\n{e}" )
 
@@ -177,6 +185,12 @@ class Rich_Progress:
     def Update_Task(self, Task_ID, Advance=None, Total=None, Description=None, State=None, Visible=None ):
         try:
             with self.Task_Lock:
+                if ( Description ):
+                    if ( len( Description ) > self.Length_Description ):
+                        Description = Description[:self.Length_Description]  # Truncate if too long
+                    else:
+                        Description = Description.ljust( self.Length_Description )  # Pad if too short
+
                 if ( Advance is not None ):
                     #print( f"Updating {Task_ID} Advance" )
                     self.Progress_Detailed.update(Task_ID, advance=Advance )
@@ -220,20 +234,30 @@ class Rich_Progress:
         except Exception as e:
             print( f"An Error occurred in Validate_Task():\n{e}" )
 
+
     #---------------------------------------------------------------------------------------------------------------#
     # Function: Update_Total_Progress
     # Update the overall total progress based on detailed tasks.
     #---------------------------------------------------------------------------------------------------------------#
     def Update_Total_Progress(self):
-        try: 
-            #Total_Completed = sum(task["completed"] for task in self.Tasks.values())
-            Total_Completed = sum( task.completed for task in self.Progress_Detailed.tasks )
-            #Total = sum( task["total"] for task in self.Tasks.values() )
+        try:
+            # Calculate total completed and total tasks, ensuring no task exceeds 100% completed
+            Total_Completed = sum(min(task.completed, task.total) for task in self.Progress_Detailed.tasks)
             Total = sum( task.total for task in self.Progress_Detailed.tasks )
-            if Total > 0:
-                self.Progress_Overall.update(self.Total_Task_ID, completed=Total_Completed / Total * 100 )
+
+            if ( Total > 0 ):
+                # Calculate overall progress as a percentage
+                Overall_Progress = Total_Completed / Total * 100
+
+                # If all tasks are 100% completed, set overall progress explicitly to 100%
+                if ( all(task.completed == task.total for task in self.Progress_Detailed.tasks) ):
+                    Overall_Progress = 100
+
+                # Update the overall progress bar with the calculated or adjusted progress
+                self.Progress_Overall.update(self.Total_Task_ID, completed=Overall_Progress)
+
         except Exception as e:
-            print( f"An Error occurred in Update_Total_Progress():\n{e}" )
+            print(f"An Error occurred in Update_Total_Progress():\n{e}")
 
     #---------------------------------------------------------------------------------------------------------------#
     # Function: Hide_Task
@@ -274,29 +298,57 @@ class Rich_Progress:
         try:
             #print( f"Getting sleepy" )
             with self.Task_Lock:
+                #self.Progress_Table.add_row( 
+                #    Panel.fit( self.Progress_Sleep, title= "Sleeping", padding= ( 0, 0 ) )
+                #)
+
+                #Progress_Sleep = Progress(
+                #    TextColumn( "[progress.description]{task.description:<40}" ),
+                #    SpinnerColumn(),
+                #    BarColumn(),
+                #    #DynamicColorBarColumn(),
+                #    "[progress.percentage]{task.percentage:>3.1f}%",
+                #    TimeElapsedColumn(),
+                #    console=self.Console,                    #,
+                #    transient=True  # Mark transient to allow reusing the row
+                #)
+                #self.Progress_Table.add_row( 
+                #    Panel.fit( Progress_Sleep, title= "", padding= ( 0, 1 ), border_style = "black on black" )
+                #)
+
                 #Task_ID = self.Progress_Detailed.add_task( "Sleeping", total=Seconds )
                 Minutes, Seconds = divmod( Sleep_Seconds, 60 )
-                Formatted_Time = f"{int(Minutes)} minutes, {int(Seconds)} seconds"
-                ID_Sleep = self.Add_Sleep( f"{Formatted_Time}", Sleep_Seconds )
+                Formatted_Time = f"Sleeping {int(Minutes)} minutes, {int(Seconds)} seconds"
+                #ID_Sleep = self.Add_Sleep( f"{Formatted_Time}", Sleep_Seconds )
+                ID_Sleep = self.Progress_Sleep.add_task( f"{Formatted_Time}", total=Sleep_Seconds )
                 #print( f"Sleeping: {Seconds} seconds" )
                 #ID_Sleep = self.Progress_Overall.add_task( ID_Sleep, description=f"Sleeping...", total=Seconds )
-                for i in range( 1, Sleep_Seconds ):
+                for Elapsed_Seconds in range( 1, Sleep_Seconds ):
                     time.sleep(1)
-                    self.Progress_Sleep.update( ID_Sleep, advance=1 )
-                    #self.Update_Task( ID_Sleep, Advance=1 )
-                    #print( f"Sleeping... {i} - {i/Seconds * 100}" )
-                    #self.Progress_Overall.update( ID_Sleep, completed=i )
-                    #completed=Total_Completed / Total * 100
-                    # ERIC - this is displaying "Sleeping", but not increasing the progress
-                    # it also never stopped sleeping
+                    Remaining_Seconds = Sleep_Seconds - Elapsed_Seconds
+                    Minutes, Seconds = divmod( Remaining_Seconds, 60 )
+                    Formatted_Time = f"Sleeping {int(Minutes)} minutes, {int(Seconds)} seconds"
+                    self.Progress_Sleep.update( ID_Sleep, description=f"{Formatted_Time}", advance=1 )
+
                 
                 #self.Progress_Overall.update( ID_Sleep, visible=False )
                 self.Progress_Sleep.update( ID_Sleep, visible=False )
+                # After sleep, remove the task from display
+                #self.Progress_Sleep.remove_task( ID_Sleep )
+
+                # Stop and remove the Progress_Sleep instance after sleep ends
+                #self.Progress_Sleep.stop()  # Stop the progress display
+
+                #Progress_Sleep.disable
+                
+
         except Exception as e:
             print( f"An Error occurred in Sleep():\n{e}" )
 
 
-# Example usage
+#---------------------------------------------------------------------------------------------------------------#
+# Main functionality
+#---------------------------------------------------------------------------------------------------------------#
 if __name__ == "__main__":
     progress = Rich_Progress()
 
